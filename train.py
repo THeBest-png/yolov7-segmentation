@@ -166,39 +166,64 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    train_loader, dataset = create_dataloader(train_path,
-                                              imgsz,
-                                              batch_size // WORLD_SIZE,
-                                              gs,
-                                              single_cls,
-                                              hyp=hyp,
-                                              augment=True,
-                                              cache=None if opt.cache == 'val' else opt.cache,
-                                              rect=opt.rect,
-                                              rank=LOCAL_RANK,
-                                              workers=workers,
-                                              image_weights=opt.image_weights,
-                                              quad=opt.quad,
-                                              prefix=colorstr('train: '),
-                                              shuffle=True)
+    from armbench.segmentation.coco_utils import get_coco, collate_fn
+    dataset_path = '/home/pawan/yolov7-segmentation/'
+
+    img_data_path = os.path.join(dataset_path, "same-object-transfer-set/images")
+    train_ann_data_path = os.path.join(dataset_path, "same-object-transfer-set/train.json")
+    val_ann_data_path = os.path.join(dataset_path, "same-object-transfer-set/val.json")
+
+    dataset = get_coco(
+        img_data_path, train_ann_data_path, mode="instances", train=True
+    )
+    coco_val_ds = get_coco(
+        img_data_path, val_ann_data_path, mode="instances", train=False
+    )
+
+    # define training and validation data loaders
+    train_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=4, shuffle=True, num_workers=4, collate_fn=collate_fn
+    )
+
+    
+    
+    # train_loader, dataset = create_dataloader(train_path,
+    #                                           imgsz,
+    #                                           batch_size // WORLD_SIZE,
+    #                                           gs,
+    #                                           single_cls,
+    #                                           hyp=hyp,
+    #                                           augment=True,
+    #                                           cache=None if opt.cache == 'val' else opt.cache,
+    #                                           rect=opt.rect,
+    #                                           rank=LOCAL_RANK,
+    #                                           workers=workers,
+    #                                           image_weights=opt.image_weights,
+    #                                           quad=opt.quad,
+    #                                           prefix=colorstr('train: '),
+    #                                           shuffle=True)
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # Process 0
     if RANK in {-1, 0}:
-        val_loader = create_dataloader(val_path,
-                                       imgsz,
-                                       batch_size // WORLD_SIZE * 2,
-                                       gs,
-                                       single_cls,
-                                       hyp=hyp,
-                                       cache=None if noval else opt.cache,
-                                       rect=True,
-                                       rank=-1,
-                                       workers=workers * 2,
-                                       pad=0.5,
-                                       prefix=colorstr('val: '))[0]
+        val_loader = torch.utils.data.DataLoader(
+        coco_val_ds, batch_size=1, shuffle=False, num_workers=4,
+        collate_fn=collate_fn)
+
+        # val_loader = create_dataloader(val_path,
+        #                                imgsz,
+        #                                batch_size // WORLD_SIZE * 2,
+        #                                gs,
+        #                                single_cls,
+        #                                hyp=hyp,
+        #                                cache=None if noval else opt.cache,
+        #                                rect=True,
+        #                                rank=-1,
+        #                                workers=workers * 2,
+        #                                pad=0.5,
+        #                                prefix=colorstr('val: '))[0]
 
         if not resume:
             if not opt.noautoanchor:
@@ -261,7 +286,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         if RANK in {-1, 0}:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+        
+        for i, (_, imgs, targets) in pbar:  # batch -------------------------------------------------------------
             callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
@@ -314,7 +340,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G'  # (GB)
                 pbar.set_description(('%11s' * 2 + '%11.4g' * 5) %
                                      (f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
-                callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths)
+                # callbacks.run('on_train_batch_end', model, ni, imgs, targets, paths)
                 if callbacks.stop_training:
                     return
             # end batch ------------------------------------------------------------------------------------------------
@@ -410,7 +436,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
     torch.cuda.empty_cache()
     return results
-
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()

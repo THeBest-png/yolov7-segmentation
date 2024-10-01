@@ -1,0 +1,7 @@
+train: "/home/pawan/yolov7-segmentation/data/same-object-transfer-set/train"
+val: "/home/pawan/yolov7-segmentation/data/same-object-transfer-set/val"
+test: "/home/pawan/yolov7-segmentation/data/same-object-transfer-set/test"
+# number of classes
+nc: 1
+# class names
+names: [ 'Object' ]
